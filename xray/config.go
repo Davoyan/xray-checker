@@ -63,6 +63,23 @@ func extractFailingOutboundTag(errMsg string) string {
 	return strings.TrimSpace(rest)
 }
 
+// failingOutboundTag builds each outbound of a config on its own and returns the tag
+// of the first one xray-core rejects, the same one the full build fails on. Unlike
+// parsing the tag out of the error text, this also works for tags containing " > ",
+// xray's error separator.
+func failingOutboundTag(configBytes []byte) string {
+	xrayConfig, err := serial.DecodeJSONConfig(bytes.NewReader(configBytes))
+	if err != nil {
+		return ""
+	}
+	for i := range xrayConfig.OutboundConfigs {
+		if _, err := xrayConfig.OutboundConfigs[i].Build(); err != nil {
+			return xrayConfig.OutboundConfigs[i].Tag
+		}
+	}
+	return ""
+}
+
 // shortBuildReason returns the leaf segment of xray's ">"-chained error message.
 func shortBuildReason(err error) string {
 	parts := strings.Split(err.Error(), " > ")
@@ -93,7 +110,10 @@ func (g *ConfigGenerator) GenerateValidatedConfig(proxies []*models.ProxyConfig,
 			return current, nil
 		}
 
-		tag := extractFailingOutboundTag(buildErr.Error())
+		tag := failingOutboundTag(configBytes)
+		if tag == "" {
+			tag = extractFailingOutboundTag(buildErr.Error())
+		}
 		idx := -1
 		if tag != "" {
 			for i, p := range current {

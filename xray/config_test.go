@@ -80,6 +80,33 @@ func TestGenerateValidatedConfigPrunesPlaintextToPublicAddress(t *testing.T) {
 	}
 }
 
+// A rejected proxy whose name contains " > " (xray's error separator) must still be
+// attributed and pruned; otherwise the unbuildable config is kept and the whole
+// instance fails to start.
+func TestGenerateValidatedConfigPrunesNameWithSeparator(t *testing.T) {
+	good := &models.ProxyConfig{
+		Protocol: "vless", Server: "good.example.com", Port: 443, Name: "good",
+		UUID: "00000000-0000-0000-0000-000000000000", Type: "tcp", Security: "tls", SNI: "good.example.com", Index: 0,
+	}
+	bad := &models.ProxyConfig{
+		Protocol: "vless", Server: "relay.example.com", Port: 80, Name: "Relay > NL",
+		UUID: "00000000-0000-0000-0000-000000000000", Type: "ws", Security: "none", Index: 1,
+	}
+
+	f := filepath.Join(t.TempDir(), "cfg.json")
+	survivors, err := NewConfigGenerator().GenerateValidatedConfig([]*models.ProxyConfig{good, bad}, 20000, f, "none")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(survivors) != 1 || survivors[0].Name != "good" {
+		t.Fatalf("expected only 'good' to survive, got %d proxies", len(survivors))
+	}
+	data, _ := os.ReadFile(f)
+	if err := validateConfigBuild(data); err != nil {
+		t.Fatalf("written config must be buildable, got: %v", err)
+	}
+}
+
 // buildsWithXrayCore feeds a generated config through the exact decode+build path
 // that xray/runner.go uses at startup. This validates the JSON against xray-core's
 // real schema, catching key/placement mistakes that json.Unmarshal would otherwise
